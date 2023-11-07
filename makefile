@@ -3,7 +3,7 @@ CFLAGS = -Wall -Wextra -pthread -g
 OBJS = main.o 
 # OBJS = file_read.o cpu_scheduler.o io_system.o main.o
 HDRS = main.h
-TARGET = prog
+TARGET = cache_simulator
 
 $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS)
