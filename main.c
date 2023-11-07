@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <getopt.h> // Include getopt header
+#include <math.h>
 
 typedef struct cache_block {
     int valid;
@@ -21,16 +22,18 @@ typedef struct cache {
 // Function to simulate cache access
 int cache_access(cache* cache, unsigned int address, int length) {
     // Implement the cache lookup and miss handling logic
-    // Return 1 if cache hit, 0 if cache miss
+    // Return 1 if cache hit, 0 if cache miss   
+    return 0;
 }
 
 int main(int argc, char* argv[]) {
-    // Parse command-line arguments
-    int cache_size = 512;
-    int block_size = 16;
-    int associativity = 2;
+    // Parse command-line arguments and initialize variables
+    int cache_size = 0;
+    int block_size = 0;
+    int associativity = 0;
     int replacement_policy = 0; // 0 for RR, 1 for RND
     char* trace_file = NULL;
+    char rr_name[4];
 
     int c;
     while ((c = getopt(argc, argv, "f:s:b:a:r:")) != -1) {
@@ -50,8 +53,10 @@ int main(int argc, char* argv[]) {
             case 'r':
                 if (strcmp(optarg, "RR") == 0) {
                     replacement_policy = 0;
+                    strcpy(rr_name, "RR");
                 } else if (strcmp(optarg, "RND") == 0) {
                     replacement_policy = 1;
+                    strcpy(rr_name, "RND");
                 } else {
                     fprintf(stderr, "Invalid replacement policy: %s\n", optarg);
                     exit(1);
@@ -76,7 +81,7 @@ int main(int argc, char* argv[]) {
     cache->replacement_policy = replacement_policy;
     cache->blocks = malloc((cache_size / block_size) * sizeof(cache_block));
 
-    // Simulate cache accesses
+    // Open trace file
     FILE* fp = fopen(trace_file, "r");
     if (fp == NULL) {
         fprintf(stderr, "Failed to open trace file: %s\n", trace_file);
@@ -118,6 +123,37 @@ int main(int argc, char* argv[]) {
     free(trace_file);
 
     // Print simulation results
+    printf("Cache Simulator CS 3853 Fall 2023\n\n");
+    printf("MILESTONE #1: - Simulation Results\n\n");
+    printf("***** Cache Input Parameters *****\n");
+    printf("Cache Size: %d KB\n", cache_size);
+    printf("Block Size: %d bytes\n", block_size);
+    printf("Associativity: %d\n", associativity);
+    printf("Replacement Policy: %s\n", rr_name);
+
+    // Calculations as needed for Milestone #1
+    int num_blocks = cache_size * 1024 / block_size;
+    int tag_size = 32 - (int)(log2((double)num_blocks) + log2((double)block_size));
+    int index_size = (int)log2(num_blocks / associativity);
+    int num_rows = num_blocks / associativity;
+    int overhead_size = num_blocks * (1 + sizeof(unsigned int) + block_size);
+    float implementation_memory_size = overhead_size / 1024.0;
+    float cost = implementation_memory_size * 0.09;
+
+    printf("\n***** Cache Calculated Values *****\n");
+    printf("Total # Blocks: %d\n", num_blocks);
+    printf("Tag Size: %d bits\n", tag_size);
+    printf("Index Size: %d bits\n", index_size);
+    printf("Total # Rows: %d\n", num_rows);
+    printf("Overhead Size: %d bytes\n", overhead_size);
+    printf("Implementation Memory Size: %.2f KB (%d bytes)\n", implementation_memory_size, overhead_size);
+    printf("Cost: $%.2f @ ($0.09 / KB)\n", cost);
+
+    /* SIDE NOTES
+        We will want to redo the calculations as needed for Milestone #1 with the proper pointers to the cache.
+        but for now this works
+    */
+    /*  MILESTONE #2
     printf("Cache Simulator CS 3853 Fall 2023\n");
     printf("MILESTONE #2: - Simulation Results\n");
     printf("***** CACHE SIMULATION RESULTS *****\n");
@@ -131,5 +167,6 @@ int main(int argc, char* argv[]) {
     printf("Hit Rate: %.2f%%\n", hit_rate);
     printf("Miss Rate: %.2f%%\n", miss_rate);
 
+    */
     return 0;
 }
