@@ -175,7 +175,7 @@ void print_sim_results(char* trace_file, int cache_size, int block_size, int ass
     printf("Index Size: %d bits\n", index_size);
     printf("Total # Rows: %d\n", num_rows);
     printf("Overhead Size: %d bytes\n", overhead_size);
-    printf("Implementation Memory Size: %.2f KB (%d bytes)\n", implementation_memory_size, implementation_memory_size*1024);
+    printf("Implementation Memory Size: %.2f KB (%d bytes)\n", implementation_memory_size, (int)implementation_memory_size*1024);
     printf("Cost: $%.2f @ ($0.09 / KB)\n\n", cost);
 }
 
