@@ -13,7 +13,7 @@ int main(int argc, char* argv[]) {
     int physical_memory = 0;
     int i = 0;
     char* trace_files[3] = {NULL, NULL, NULL};
-    char rr_name[4];
+    char rr_name[12];
     // FILE* fp[3];
     
     int c; //   Parse command line arguments
