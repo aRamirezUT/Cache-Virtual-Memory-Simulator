@@ -3,7 +3,7 @@
 void handleIncorrectUsage(char* errorMessage) {
 
     printf("\n%s Please launch using:\n", errorMessage);
-    printf("./Sim -f Trace1.trc -s 512 -b 16 -a 8 -r RND\n\n");
+    printf("./sim -f Trace1.trc -s 512 -b 16 -a 8 -r RND\n\n");
 
     printf("-f <trace file name> [ name of text file with the trace ]\n");
     printf("-s <cache size in KB> [ 1 KB to 8 MB ]\n");
