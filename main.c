@@ -1,284 +1,141 @@
 #include "main.h"
 
+void handleIncorrectUsage(char* errorMessage) {
+
+    printf("\n%s Please launch using:\n", errorMessage);
+    printf("./Sim -f Trace1.trc -s 512 -b 16 -a 8 -r RND\n\n");
+
+    printf("-f <trace file name> [ name of text file with the trace ]\n");
+    printf("-s <cache size in KB> [ 1 KB to 8 MB ]\n");
+    printf("-b <block size> [ 4 bytes to 64 bytes ]\n");
+    printf("-a <associativity> [ 1, 2, 4, 8, 16 ]\n");
+    printf("-r <replacement policy> [ RR or RND]\n\n");
+}
+
+void doCacheMath(varStruct* vars, argStruct* args) {
+    vars->total_blocks = (args->cache_size*1024) / args->block_size;
+    vars->index_size = round(log( (args->cache_size*1024) / (args->associativity * args->block_size) )/log(2)); //bits
+    vars->offset_size = round(log(args->block_size)/log(2)); //bits
+    vars->tag_size = 32 - vars->offset_size - vars->index_size; //bits
+    vars->total_indices = pow(2, vars->index_size);
+    vars->overhead_memory_size = ( (1+vars->tag_size)*args->associativity * vars->total_indices ) / 8; //in bytes
+    vars->implementation_memory_size = ((vars->total_blocks * args->block_size) + vars->overhead_memory_size) / 1024; //in KB
+
+    vars->cache_hit_rate = -1; //percent
+    vars->cpi = -1; //cycles per instruction
+}
+    
+void showCalculatedValues(varStruct* vars) {
+    printf("***** Cache Calculated Value *****\n\n");
+    printf("Total # Bocks: %d\n", vars->total_blocks);
+    printf("Tag Size: %d bits\n", vars->tag_size);
+    printf("Index Size: %d bits\n", vars->index_size);
+    printf("Total # Rows: %d\n", vars->total_indices);
+    printf("Overhead Size: %d bytes\n", vars->overhead_memory_size);
+    printf("Implementation Memory Size: %d KB (%d bytes)\n",
+        vars->implementation_memory_size, vars->implementation_memory_size * 1024);
+    printf("Cost: $%.2f @ ($0.09 / KB)\n\n",
+        (vars->implementation_memory_size) * 0.09);
+    
+}
+
 int main(int argc, char* argv[]) {
-    //  Parse command-line arguments and initialize variables
-    int cache_size = 0;
-    int block_size = 0;
-    int associativity = 0;
-    int replacement_policy = 0; //  0 for RR, 1 for RND
-    int total_accesses = 0;
-    int cache_hits = 0;
-    int cache_misses = 0;
-    int physical_memory = 0;
-    int compulsory_misses = 0;
-    int conflict_misses = 0;
-    int total_instructions = 0;
-    int i = 0;
-
-    double total_cycles = 0.0;
-    
-    char* trace_files[3] = {NULL, NULL, NULL};
-    char rr_name[12];
-    // FILE* fp[3];
-    
-    int c; //   Parse command line arguments
-    while ((c = getopt(argc, argv, "f:s:b:a:r:p:")) != -1) {
-        switch (c) {
-            case 'f':
-                if (!trace_files[0]) {
-                    trace_files[0] = strdup(optarg);
-                } else if (!trace_files[1]) {
-                    trace_files[1] = strdup(optarg);
-                } else if (!trace_files[2]) {
-                    trace_files[2] = strdup(optarg);
-                } else {
-                    fprintf(stderr, "Error: Maximum of 3 trace files allowed.\n");
-                    exit(1);
-                }
-                break;
-            case 's':
-                cache_size = atoi(optarg);
-                break;
-            case 'b':
-                block_size = atoi(optarg);
-                break;
-            case 'a':
-                associativity = atoi(optarg);
-                break;
-            case 'r':
-                if (strcmp(optarg, "RR") == 0) {
-                    replacement_policy = 0;
-                    strcpy(rr_name, "Round Robin");
-                } else if (strcmp(optarg, "RND") == 0) {
-                    replacement_policy = 1;
-                    strcpy(rr_name, "Random");
-                } else {
-                    fprintf(stderr, "Invalid replacement policy: %s\n", optarg);
-                    exit(1);
-                }
-                break;
-            case 'p':
-                physical_memory = parse_memory_size(optarg);
-                break;
-            default:
-                fprintf(stderr, "Usage: ./cache_simulator -f <trace file> -s <cache size> -b <block size> -a <associativity> -r <replacement policy> -p <physical memory in KB>\n");
-                exit(1);
-        }
+    //check for correct usage
+    int maxArgs = 5;
+    if((argc % 2 == 0 || argc < 3 || argc > 1 + (maxArgs * 2)) && argc != 1) {
+        handleIncorrectUsage("Invalid number of arguments.");
+        exit(-1);
     }
-    //  Initialize cache
-    cache* cache = create_cache(cache_size, block_size, associativity, replacement_policy);
-    cache_block *block;
 
-    //  Open trace file(s)
-    for (i = 0; i < 3; i++){
-        if(trace_files[i]){
-            FILE* fp = fopen(trace_files[i], "r");
-            if(fp == NULL){
-                fprintf(stderr, "Failed to open trace file: %s\n", trace_files[i]);
-                exit(1);
-            }
+    //initialize argument variables
+    argStruct* args = (argStruct*) malloc(sizeof(argStruct));
+    args->trace_file_name = NULL;
+    args->cache_size = 0; //in KB
+    args->block_size = 0; //in bytes
+    args->associativity = 0;
+    args->replacement_policy = NULL; //will be RR or RND
 
-            if (cache == NULL){
-                //Handle cache creation error
-                fprintf(stderr, "Failed to create cache!\n");
-                exit(1);
-            }
-
-            char line[1024]; // Process trace file(s)
-            while (fgets(line, sizeof(line), fp) != NULL) {
-                unsigned int address;
-                int length;
-
-                if (strncmp(line, "EIP", 3) == 0) {
-                    //  Instruction fetch
-                    sscanf(line, "EIP (%d): %x", &length, &address);
-                    total_instructions++; //Increment for each instruction fetch
-                    total_cycles += 4; // 4 clock cycles for accessing main memory
-                } else {
-                    //  Data access
-                    sscanf(line, "dstM: %x srcM: %x", &address, &address);
-                    length = 4;
-                }
-                
-                total_accesses++; //Increment for each data access
-
-                int hit = cache_access(cache, address, length, &block, &compulsory_misses, &conflict_misses);
-                if (hit) {
-                    cache_hits++;
-                } else {
-                    cache_misses++;
-                }
-            
-            }// End of processing trace file(s)
-            
-            fclose(fp);
-            print_sim_results(trace_files[i], cache_size, block_size, associativity, rr_name, physical_memory, total_accesses, cache_hits, cache_misses, compulsory_misses, conflict_misses, total_instructions, total_cycles);
-        } else {
-            break;
+    //read in arguments
+    int i;
+    for(i=1; i < argc; i+=2 ) {
+        if(strcmp(argv[i], "-f") == 0) {
+            args->trace_file_name = argv[i+1];
+        } else if(strcmp(argv[i], "-s") == 0) {
+            args->cache_size = atoi(argv[i+1]);
+        } else if(strcmp(argv[i], "-b") == 0) {
+            args->block_size = atoi(argv[i+1]);
+        } else if(strcmp(argv[i], "-a") == 0) {
+            args->associativity = atoi(argv[i+1]);
+        } else if(strcmp(argv[i], "-r") == 0) {
+            args->replacement_policy = argv[i+1];
         }
     }
 
-    free(cache->blocks);
-    free(cache);
+    varStruct* vars = (varStruct*) malloc(sizeof(varStruct)); //declared here so it can be free'd after use
+    if(args->trace_file_name == NULL) {
+        handleIncorrectUsage("Trace file not included.");
+        free(args);
+        free(vars);
+        exit(-1);
+    }
 
+    //read in file
+    Queue* fileContents = readFile(args->trace_file_name); //queue consists of (char*) void* to each line
+
+    //process file
+    Queue* traceData = convertData(fileContents);
+
+    doCacheMath(vars, args);
+
+    //run simulation
+    resultDataStruct* resDt = runSimulation(traceData, args, vars);
+
+    float percentCacheMat = (((vars->implementation_memory_size)-(resDt->usedCacheSpace / 1024)) / vars->implementation_memory_size) * 100;
+    float unused_cache_space = (vars->implementation_memory_size)-(resDt->usedCacheSpace / 1024);
+
+
+    //print output report
+    printf("Cache Simulator CS 3853 Fall 2023 - Group #20\n\nMILESTONE #1: Input Parameters and Calculated Values\n\n");
+    printf("Trace File: %s\n\n", args->trace_file_name);
+    printf("***** Cache Input Parameters *****\n");
+    printf("Cache Size: %d KB\n", args->cache_size);
+    printf("Block Size: %d bytes\n", args->block_size);
+    printf("Associativity: %d\n", args->associativity);
+    printf("Replacement Policy: %s\n\n", args->replacement_policy);
+
+    showCalculatedValues(vars);
+
+    printf("\nMILESTONE #2 - SIMULATION RESULTS\n\n***** CACHE SIMULATION RESULTS *****\n\n");
+    printf("Total Cache Accesses:   %d   (%d addresses)\n", resDt->totalCacheAccesses, resDt->numBlocksAccessed);
+    printf("Cache Hits:             %d\n", resDt->cacheHits);
+    printf("Cache Misses:           %d\n", resDt->totalCacheAccesses - resDt->cacheHits);
+    printf("--- Compulsory Misses:  %d\n", resDt->compulsoryMisses);
+    printf("--- Conflict Misses:    %d\n\n", resDt->conflictMisses);
+
+    printf("***** ***** CACHE HIT & MISS RATE ***** *****\n\n");
+    printf("Cache Hit Rate: %.4f%%\n", vars->cache_hit_rate);
+    printf("Cache Miss Rate: %.4f%%\n", 100 - vars->cache_hit_rate);
+    printf("CPI: %.2f cycles/instruction\n\n", vars->cpi);
+    printf("Unused Cache Space: %.2f KB / %.2d KB = %.2f%%  Waste: $%.2f\n",
+        unused_cache_space, vars->implementation_memory_size, percentCacheMat, (unused_cache_space * 0.09));
+    printf("Unused Cache Blocks: %d / %d\n\n", (vars->total_blocks)-(resDt->usedCacheBlocks), vars->total_blocks);    
+
+    free(resDt->numBlkAcsCntArry);
+    free(resDt);
+    free(args);
+    free(vars);
+
+    // printf("PROGRAM COMPLETE\n\n");
     return 0;
 }
 
-/* --------------   START OF FUNCTION DECLARATIONS  -------------- */
+/* Function definitions */
 
-int parse_memory_size(char *mem_size) {
-    int size;
-    char unit[3];
-
-    // Parse the size and unit from the argument
-    sscanf(mem_size, "%d%s", &size, unit);
-
-    // Convert the size to kilobytes
-    if (strcmp(unit, "GB") == 0) {
-        size *= 1024 * 1024; // Convert gigabytes to kilobytes
-    } else if (strcmp(unit, "MB") == 0) {
-        size *= 1024; // Convert megabytes to kilobytes
-    } else if (strcmp(unit, "KB") != 0) {
-        // Invalid unit
-        fprintf(stderr, "Error: Invalid unit for physical memory size.\n");
-        exit(1);
-    }
-
-    return size;
+bool numberIsPower(int number, int power) {
+    return lowerPrecision(round(log(number)/log(power)), 2) == lowerPrecision(log(number)/log(power), 2);
 }
 
-/*  'compulsory_misses' and 'conflict_misses' are both calculated in the main() after calling cache_access  
-*
-*   Return 1 iff cache hit, 0 if cache miss   
-*/
-int cache_access(cache* cache, unsigned int address, int length, cache_block** block, int* compulsory_misses, int* conflict_misses) {
-    // Assume direct-mapped cache for now
-    int block_size = cache->block_size;
-    int index_bits = log2(cache->size / block_size);
-    int offset = address & (block_size - 1);
-    int index = (address >> (int)log2(block_size)) & ((1 << index_bits) - 1);
-    unsigned int tag = address >> (index_bits + (int)log2(block_size));
-
-    *block = &cache->blocks[index];
-
-    if ((*block)->valid && (*block)->tag == tag) {
-        return 1; // Cache hit
-    } else {
-        // Cache miss - update the block with new tag and mark as valid
-        if (!(*block)->valid) {
-            (*block)->accessed = 1; // Mark the block as accessed
-            (*compulsory_misses)++;
-        } else{
-            (*conflict_misses)++;
-        }
-
-        (*block)->valid = 1;
-        (*block)->tag = tag;
-        // Load data into the cache block (simulation purposes)
-        // Not needed for this project sim
-
-        return 0; // Cache miss
-    }
+double lowerPrecision(double number, int precision) {
+    int factor = pow(10, precision);
+    return floor(number*factor)/factor;
 }
-
-
-// Inside your create_cache function
-cache* create_cache(int cache_size, int block_size, int associativity, int replacement_policy) {
-    cache* new_cache = malloc(sizeof(cache));
-    if (new_cache == NULL) {
-        // Handle allocation error
-        return NULL;
-    }
-    
-    new_cache->size = cache_size;
-    new_cache->block_size = block_size;
-    new_cache->associativity = associativity;
-    new_cache->replacement_policy = replacement_policy;
-
-    // Allocate memory for cache blocks
-    new_cache->blocks = malloc((cache_size / block_size) * sizeof(cache_block));
-    if (new_cache->blocks == NULL) {
-        // Handle allocation error
-        free(new_cache);
-        return NULL;
-    }
-
-    // Initialize each cache block
-    for (int i = 0; i < (cache_size / block_size); i++) {
-        new_cache->blocks[i].valid = 0;
-        new_cache->blocks[i].tag = 0;
-        new_cache->blocks[i].accessed = 0;
-        // Allocate memory for each block's data
-        new_cache->blocks[i].data = malloc(block_size * sizeof(unsigned char));
-        if (new_cache->blocks[i].data == NULL) {
-            // Handle allocation error
-            // Free previously allocated memory and return NULL
-            for (int j = 0; j < i; j++) {
-                free(new_cache->blocks[j].data);
-            }
-            free(new_cache->blocks);
-            free(new_cache);
-            return NULL;
-        }
-    }
-
-    return new_cache;
-}
-
-
-
-void print_sim_results(char* trace_file, int cache_size, int block_size, int associativity, char* rr_name, int phyiscal_memory, int total_accesses, int cache_hits, int cache_misses, int compulsory_misses, int conflict_misses, int total_instructions, double total_cycles){
-    printf("Cache Simulator - CS 3853 Fall 2023\n\n");
-    printf("Trace File: %s\n\n", trace_file);
-    printf("MILESTONE #1: - Simulation Results\n\n");
-    printf("***** Cache Input Parameters *****\n");
-    printf("Cache Size: %d KB\n", cache_size);
-    printf("Block Size: %d bytes\n", block_size);
-    printf("Associativity: %d\n", associativity);
-    printf("Replacement Policy: %s\n", rr_name);
-
-    int num_blocks = (cache_size * 1024) / block_size;
-    int num_rows = num_blocks / associativity;
-    int index_size = (int)log2(num_rows);
-    int tag_size = 32 - index_size - (int)log2(block_size);
-    int overhead_size = ((tag_size + 1) * associativity * num_rows) / 8;
-    float implementation_memory_size = (num_blocks * block_size + overhead_size) / 1024.0;
-    float cost = (implementation_memory_size) * 0.09;
-
-    printf("\n***** Cache Calculated Values *****\n\n");
-    printf("Total # Blocks: %d\n", num_blocks);
-    printf("Tag Size: %d bits\n", tag_size);
-    printf("Index Size: %d bits\n", index_size);
-    printf("Total # Rows: %d\n", num_rows);
-    printf("Overhead Size: %d bytes\n", overhead_size);
-    printf("Implementation Memory Size: %.2f KB (%d bytes)\n", implementation_memory_size, (int)implementation_memory_size*1024);
-    printf("Cost: $%.2f @ ($0.09 / KB)\n\n", cost);
-
-    printf("MILESTONE #2: - Simulation Results\n");
-    printf("***** CACHE SIMULATION RESULTS *****\n");
-    printf("Total Cache Accesses: %d\n", total_accesses);
-    printf("Cache Hits: %d\n", cache_hits);
-    printf("Cache Misses: %d\n", cache_misses);
-    printf("--- Compulsory Misses: %d\n", compulsory_misses);
-    printf("--- Conflict Misses: %d\n", conflict_misses);
-
-    double hit_rate = (double)cache_hits / total_accesses * 100.0;
-    double miss_rate = 100.0 - hit_rate;
-    printf("***** ***** CACHE HIT & MISS RATE: ***** *****\n");
-    printf("Hit Rate: %.2f%%\n", hit_rate);
-    printf("Miss Rate: %.2f%%\n", miss_rate);
-
-    double cpi = total_cycles / total_instructions;
-
-    double unused_kb = ((num_blocks - compulsory_misses) * (block_size + overhead_size)) / 1024.0;
-    double unused_percentage = (unused_kb / (cache_size * 1024)) * 100.0;
-    double waste = cost / 1024.0 * unused_kb;
-
-    printf("CPI: %.2f Cycles/Instruction\n", cpi);
-    printf("Unused Cache Space: %.2f KB / %.2d KB = %.2f%% Waste: $%.2f\n", unused_kb, cache_size, unused_percentage, waste);
-}
-
-    /* SIDE NOTES
-        We will want to redo the calculations as needed for Milestone #1 with the proper pointers to the cache.
-        but for now this works
-    */

@@ -1,49 +1,54 @@
 #ifndef MAIN_H
 #define MAIN_H
 
+#pragma pack(1) //compiler directive to compact memory usage
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <pthread.h>
-#include <unistd.h>
-#include <time.h>
-#include <sys/times.h>
-#include <semaphore.h>
-#include <errno.h>
-#include <stdbool.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <getopt.h>
 #include <math.h>
+#include <pthread.h>
+#include "data.h"
+#include "queue.h"
+#include "simulation.h"
 
-typedef struct cache_block {
-    int valid;
-    unsigned int tag;
-    int accessed; // 0 if its has not been accessed 1 if it has been accessed
-    unsigned char *data;
-} cache_block;
+// Forward declarations for structures used in other headers
+struct rowStruct;
+struct blockStruct;
+struct cacheStruct;
+struct argStruct;
+struct varStruct;
+struct resultDataStruct;
+struct Queue; // Assuming Queue is used but not defined here
 
-typedef struct cache {
-    int size;
-    int block_size;
+typedef struct argStruct {
+    char* trace_file_name;
+    int cache_size; //in KB
+    int block_size; //in bytes
     int associativity;
-    int replacement_policy; //  0 for RR, 1 for RND
-    cache_block* blocks;
-} cache;
+    char* replacement_policy; //will be RR, RND, or LRU
+} argStruct;
 
-cache_block *current_block;
+typedef struct varStruct {
+    int total_blocks;
+    int index_size; //bits
+    int offset_size; //bits
+    int tag_size; //bits
+    int total_indices;
+    int overhead_memory_size; //in bytes
+    int implementation_memory_size; //in bytes
 
-//  Function to simulate cache access
-    //  Implement the cache lookup and miss handling logic
-    //  Return 1 if cache hit, 0 if cache miss   
-int cache_access(cache* cache, unsigned int address, int length, cache_block **block, int* compulsory_misses, int* conflict_misses);
+    double cache_hit_rate; //percent
+    double cpi; //cycles per instruction
+} varStruct;
 
-//  Function to print simulation results
-void print_sim_results(char* trace_file, int cache_size, int block_size, int associativity, char* rr_name, int physical_memory, int total_accesses, int cache_hits, int cache_misses, int compulsory_misses, int conflict_misses, int total_instructions, double total_cycles);
+//function prototypes
 
-//  Function to parse memory unit to KB
-int parse_memory_size(char *mem_size);
-#endif /* MAIN_H */
+void handleIncorrectUsage(char* errorMessage);
+void doCacheMath(varStruct* vars, argStruct* args);
+void showCalculatedValues(varStruct* vars);
+int main(int argc, char* argv[]);
+bool numberIsPower(int number, int power);
+double lowerPrecision(double number, int precision);
 
-cache* create_cache(int cache_size, int block_size, int associativity, int replacement_policy);
+#endif
